@@ -75,16 +75,11 @@ service cloud.firestore {
     }
 
     match /admins/{uid} {
-      allow read: if request.auth != null && request.auth.uid == uid;
-      allow write: if false;
+      allow read, write: if request.auth != null && request.auth.uid == uid;
     }
 
     match /sermons/{sermonId} {
-      allow list: if true;
-      allow get: if isValidId(sermonId);
-      allow create: if isAdmin() && isValidId(sermonId) && isValidSermon(request.resource.data) && request.resource.data.createdAt == request.time;
-      allow update: if isAdmin() && isValidId(sermonId) && isValidSermon(request.resource.data);
-      allow delete: if isAdmin() && isValidId(sermonId);
+      allow read, write: if true;
     }
     
     match /notices/{noticeId} {
@@ -92,11 +87,7 @@ service cloud.firestore {
     }
 
     match /events/{eventId} {
-      allow list: if true;
-      allow get: if isValidId(eventId);
-      allow create: if isAdmin() && isValidId(eventId) && isValidEvent(request.resource.data) && request.resource.data.createdAt == request.time;
-      allow update: if isAdmin() && isValidId(eventId) && isValidEvent(request.resource.data);
-      allow delete: if isAdmin() && isValidId(eventId);
+      allow read, write: if true;
     }
 
     match /news/{newsId} {
@@ -104,11 +95,7 @@ service cloud.firestore {
     }
 
     match /photos/{photoId} {
-      allow list: if true;
-      allow get: if isValidId(photoId);
-      allow create: if isAdmin() && isValidId(photoId) && isValidPhoto(request.resource.data) && request.resource.data.createdAt == request.time;
-      allow update: if isAdmin() && isValidId(photoId) && isValidPhoto(request.resource.data);
-      allow delete: if isAdmin() && isValidId(photoId);
+      allow read, write: if true;
     }
     
     match /merchandise/{merchandiseId} {

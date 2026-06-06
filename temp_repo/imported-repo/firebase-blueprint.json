@@ -1,0 +1,90 @@
+{
+  "entities": {
+    "Sermon": {
+      "title": "Sermon",
+      "description": "Represents a sermon recording",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "speaker": { "type": "string" },
+        "date": { "type": "string" },
+        "series": { "type": "string" },
+        "img": { "type": "string" },
+        "videoUrl": { "type": "string" },
+        "notesUrl": { "type": "string" },
+        "createdAt": { "type": "number", "description": "Timestamp" }
+      },
+      "required": ["title", "speaker", "date", "series", "img", "videoUrl", "createdAt"]
+    },
+    "Notice": {
+      "title": "Notice",
+      "description": "Represents an announcement or a notice on the homepage",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "date": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["title", "content", "date", "createdAt"]
+    },
+    "Event": {
+      "title": "Event",
+      "description": "Represents a church event",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "date": { "type": "string" },
+        "time": { "type": "string" },
+        "location": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["title", "date", "time", "location", "createdAt"]
+    },
+    "PageContent": {
+      "title": "PageContent",
+      "description": "Represents dynamic text sections of the website",
+      "type": "object",
+      "properties": {
+        "sectionId": { "type": "string" },
+        "content": { "type": "string" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["sectionId", "content", "updatedAt"]
+    },
+    "Photo": {
+      "title": "Photo",
+      "description": "Represents an image in the gallery",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "imgUrl": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["title", "imgUrl", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/sermons": {
+      "schema": { "$ref": "#/entities/Sermon" },
+      "description": "Collection of sermons"
+    },
+    "/notices": {
+      "schema": { "$ref": "#/entities/Notice" },
+      "description": "Collection of notices/announcements."
+    },
+    "/events": {
+      "schema": { "$ref": "#/entities/Event" },
+      "description": "Collection of church events."
+    },
+    "/page_contents": {
+      "schema": { "$ref": "#/entities/PageContent" },
+      "description": "Collection of page dynamic texts."
+    },
+    "/photos": {
+      "schema": { "$ref": "#/entities/Photo" },
+      "description": "Collection of photos for the gallery."
+    }
+  }
+}
+

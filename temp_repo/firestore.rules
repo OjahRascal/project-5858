@@ -1,0 +1,114 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} { 
+      allow read, write: if false; 
+    }
+    
+    function isSignedIn() { return request.auth != null; }
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+    
+    function isValidId(id) { 
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
+    }
+
+    // Sermon Validation
+    function isValidSermon(data) {
+      return data.keys().hasAll(['title', 'speaker', 'date', 'series', 'img', 'videoUrl', 'createdAt']) &&
+        data.keys().size() <= 8 && // 8 to optionally allow notesUrl
+        data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+        data.speaker is string && data.speaker.size() > 0 && data.speaker.size() <= 200 &&
+        data.date is string && data.date.size() > 0 && data.date.size() <= 100 &&
+        data.series is string && data.series.size() > 0 && data.series.size() <= 100 &&
+        data.img is string && data.img.size() > 0 && data.img.size() <= 1000 &&
+        data.videoUrl is string && data.videoUrl.size() > 0 && data.videoUrl.size() <= 1000 &&
+        data.createdAt is timestamp &&
+        (data.get('notesUrl', '') is string && data.get('notesUrl', '').size() <= 1000);
+    }
+    
+    // Notice Validation
+    function isValidNotice(data) {
+      return data.keys().hasAll(['title', 'content', 'date', 'createdAt']) &&
+             data.keys().size() == 4 &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+             data.content is string && data.content.size() > 0 && data.content.size() <= 5000 &&
+             data.date is string && data.date.size() > 0 && data.date.size() <= 100 &&
+             data.createdAt is timestamp;
+    }
+
+    // Event Validation
+    function isValidEvent(data) {
+      return data.keys().hasAll(['title', 'date', 'time', 'location', 'createdAt']) &&
+             data.keys().size() == 5 &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+             data.date is string && data.date.size() > 0 && data.date.size() <= 100 &&
+             data.time is string && data.time.size() > 0 && data.time.size() <= 100 &&
+             data.location is string && data.location.size() > 0 && data.location.size() <= 500 &&
+             data.createdAt is timestamp;
+    }
+
+    // News Validation
+    function isValidNews(data) {
+      return data.keys().hasAll(['title', 'category', 'content', 'date', 'createdAt']) &&
+             data.keys().size() >= 5 && data.keys().size() <= 8 &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+             data.category is string && data.category.size() > 0 && data.category.size() <= 100 &&
+             data.content is string && data.content.size() > 0 && data.content.size() <= 10000 &&
+             data.date is string && data.date.size() > 0 && data.date.size() <= 100 &&
+             data.get('time', '') is string && data.get('time', '').size() <= 100 &&
+             data.get('location', '') is string && data.get('location', '').size() <= 200 &&
+             (!data.keys().hasAll(['isEvent']) || data.isEvent is bool) &&
+             data.createdAt is timestamp;
+    }
+
+    // Photo Validation
+    function isValidPhoto(data) {
+      return data.keys().hasAll(['title', 'images', 'createdAt']) &&
+             data.keys().size() == 3 &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+             data.images is list &&
+             data.createdAt is timestamp;
+    }
+
+    match /admins/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    match /sermons/{sermonId} {
+      allow list: if true;
+      allow get: if isValidId(sermonId);
+      allow create: if isAdmin() && isValidId(sermonId) && isValidSermon(request.resource.data) && request.resource.data.createdAt == request.time;
+      allow update: if isAdmin() && isValidId(sermonId) && isValidSermon(request.resource.data);
+      allow delete: if isAdmin() && isValidId(sermonId);
+    }
+    
+    match /notices/{noticeId} {
+      allow read, write: if true;
+    }
+
+    match /events/{eventId} {
+      allow list: if true;
+      allow get: if isValidId(eventId);
+      allow create: if isAdmin() && isValidId(eventId) && isValidEvent(request.resource.data) && request.resource.data.createdAt == request.time;
+      allow update: if isAdmin() && isValidId(eventId) && isValidEvent(request.resource.data);
+      allow delete: if isAdmin() && isValidId(eventId);
+    }
+
+    match /news/{newsId} {
+      allow read, write: if true;
+    }
+
+    match /photos/{photoId} {
+      allow read, write: if true;
+    }
+    
+    match /merchandise/{merchandiseId} {
+      allow read, write: if true;
+    }
+  }
+}

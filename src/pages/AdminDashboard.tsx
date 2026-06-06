@@ -3,7 +3,7 @@ import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth, db, handleFirestoreError, OperationType } from '@/lib/firebase';
 import { useLocalCollection } from '@/lib/localStore';
 import { collection, query, orderBy, onSnapshot, doc, setDoc, deleteDoc, serverTimestamp, getDoc, addDoc } from 'firebase/firestore';
-import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
 import { Calendar, Bell, FileText, Settings, LogOut, Video, Plus, Trash2, Database, UploadCloud, Edit2, Image, ShoppingBag, X } from 'lucide-react';
 
 export default function AdminDashboard() {
@@ -134,17 +134,63 @@ function AdminLogin() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [loginAttempts, setLoginAttempts] = useState(0);
+  const [isLocked, setIsLocked] = useState(false);
+  const [lockTimeRemaining, setLockTimeRemaining] = useState(0);
+  const [isSignUp, setIsSignUp] = useState(false);
+
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (isLocked && lockTimeRemaining > 0) {
+      timer = setInterval(() => {
+        setLockTimeRemaining(prev => prev - 1);
+      }, 1000);
+    } else if (isLocked && lockTimeRemaining <= 0) {
+      setIsLocked(false);
+      setLoginAttempts(0);
+      setErrorMsg('');
+    }
+    return () => clearInterval(timer);
+  }, [isLocked, lockTimeRemaining]);
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLocked) {
+      setErrorMsg(`Too many attempts. Please try again in ${lockTimeRemaining} seconds.`);
+      return;
+    }
     if (isLoggingIn) return;
     setIsLoggingIn(true);
     setErrorMsg('');
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      if (isSignUp) {
+        const userCred = await createUserWithEmailAndPassword(auth, email, password);
+        await setDoc(doc(db, 'admins', userCred.user.uid), { email, createdAt: serverTimestamp() });
+      } else {
+        await signInWithEmailAndPassword(auth, email, password);
+      }
+      // Reset on success
+      setLoginAttempts(0);
     } catch (err: any) {
       console.error(err);
-      setErrorMsg(err.message || 'Login failed. Check your credentials.');
+      if (err.code === 'auth/invalid-credential') {
+        setErrorMsg('Invalid email or password. Please verify your credentials or sign up if you do not have an account.');
+      } else if (err.code === 'auth/email-already-in-use') {
+        setErrorMsg('This email is already in use. Please sign in instead.');
+      } else if (isSignUp) {
+        setErrorMsg('Sign up failed: ' + err.message);
+      } else {
+        const newAttempts = loginAttempts + 1;
+        setLoginAttempts(newAttempts);
+        
+        if (newAttempts >= 5) {
+          setIsLocked(true);
+          setLockTimeRemaining(60); // Lock for 60 seconds
+          setErrorMsg('Too many login attempts. For your security, this account has been temporarily locked. Please try again in 60 seconds.');
+        } else {
+          setErrorMsg(`Login failed (Attempt ${newAttempts} of 5). Check your credentials. Note: If you haven't created an account yet, click "Need to create an account?" below.`);
+        }
+      }
     } finally {
       setIsLoggingIn(false);
     }
@@ -157,8 +203,8 @@ function AdminLogin() {
           <div className="w-16 h-16 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
             <Settings size={32} />
           </div>
-          <h1 className="text-3xl font-serif font-bold text-slate-900">Admin Login</h1>
-          <p className="text-slate-500 mt-2">Sign in to manage the website content.</p>
+          <h1 className="text-3xl font-serif font-bold text-slate-900">{isSignUp ? 'Create Admin' : 'Admin Login'}</h1>
+          <p className="text-slate-500 mt-2">{isSignUp ? 'Create a new admin account.' : 'Sign in to manage the website content.'}</p>
         </div>
 
         {errorMsg && (
@@ -176,6 +222,7 @@ function AdminLogin() {
               className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none transition-all" 
               value={email} 
               onChange={e => setEmail(e.target.value)} 
+              disabled={isLocked || isLoggingIn}
             />
           </div>
           <div>
@@ -183,19 +230,31 @@ function AdminLogin() {
             <input 
               type="password" 
               required 
+              minLength={6}
               className="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none transition-all" 
               value={password} 
               onChange={e => setPassword(e.target.value)} 
+              disabled={isLocked || isLoggingIn}
             />
           </div>
           <button 
-            type="submit"
-            disabled={isLoggingIn}
-            className={`w-full py-3 bg-slate-900 text-white rounded-lg font-bold hover:bg-slate-800 transition ${isLoggingIn ? 'opacity-50 cursor-not-allowed' : ''}`}
+            type="submit" 
+            disabled={isLocked || isLoggingIn}
+            className={`w-full py-3 bg-slate-900 text-white rounded-lg font-bold hover:bg-slate-800 transition ${(isLocked || isLoggingIn) ? 'opacity-50 cursor-not-allowed' : ''}`}
           >
-            {isLoggingIn ? 'Signing in...' : 'Sign In'}
+            {isLocked ? `Locked (${lockTimeRemaining}s)` : isLoggingIn ? (isSignUp ? 'Creating...' : 'Signing in...') : (isSignUp ? 'Create Account' : 'Sign In')}
           </button>
         </form>
+        
+        <div className="text-center">
+            <button 
+              type="button" 
+              onClick={() => setIsSignUp(!isSignUp)} 
+              className="text-sm text-red-600 hover:text-red-800 transition-colors"
+            >
+              {isSignUp ? 'Already have an account? Sign In' : 'Need to create an account? Sign Up'}
+            </button>
+        </div>
       </div>
     </div>
   );
@@ -256,11 +315,6 @@ function SermonsAdmin() {
       }
 
       if (editingId) {
-        // We do not update createdAt as per immortal field rule, but there's a rule that updates MUST use serverTimestamp for updatedAt?
-        // Let's just update the fields we have.
-        // Also wait: what did we set as immortal field in firestore.rules?
-        // I will check the firestore rules later if it fails.
-        // Actually, let's keep createdAt for new docs.
         const editingSermon = sermons.find(s => s.id === editingId);
         if (editingSermon) {
           data.createdAt = editingSermon.createdAt; // preserve
@@ -275,8 +329,8 @@ function SermonsAdmin() {
       setIsAdding(false);
       setEditingId(null);
       setNewSermon({ title: '', speaker: '', date: '', series: '', img: '', videoUrl: '', notesUrl: '' });
-    } catch (err) {
-      handleFirestoreError(err, editingId ? OperationType.UPDATE : OperationType.CREATE, 'sermons');
+    } catch (err: any) {
+      alert("Failed to save sermon: " + (err.message || String(err)));
     }
   };
 
@@ -444,8 +498,8 @@ function EventsAdmin() {
       setIsAdding(false);
       setEditingId(null);
       setNewEvent({ title: '', date: '', time: '', location: '' });
-    } catch (err) {
-      handleFirestoreError(err, editingId ? OperationType.UPDATE : OperationType.CREATE, 'events');
+    } catch (err: any) {
+      alert("Failed to save event: " + (err.message || String(err)));
     }
   };
 
@@ -522,25 +576,40 @@ function EventsAdmin() {
 type NoticeData = { id: string; title: string; content: string; date: string; };
 
 function NoticesAdmin() {
-  const [notices, setNotices] = useLocalCollection<NoticeData>('local_notices');
+  const [notices, setNotices] = useState<NoticeData[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newNotice, setNewNotice] = useState({ title: '', content: '', date: '' });
+
+  useEffect(() => {
+    const q = query(collection(db, 'notices'), orderBy('createdAt', 'desc'));
+    const unsubscribe = onSnapshot(q, snapshot => {
+      setNotices(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as NoticeData)));
+    });
+    return () => unsubscribe();
+  }, []);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       if (editingId) {
-        setNotices(notices.map(n => n.id === editingId ? { ...n, ...newNotice } : n));
+        const editingItem = notices.find(n => n.id === editingId);
+        await setDoc(doc(db, 'notices', editingId), {
+          ...newNotice,
+          createdAt: editingItem ? (editingItem as any).createdAt : serverTimestamp()
+        });
       } else {
         const newId = Date.now().toString() + Math.random().toString(36).substring(2,9);
-        setNotices([{ id: newId, ...newNotice, createdAt: new Date().toISOString() } as any, ...notices]);
+        await setDoc(doc(db, 'notices', newId), {
+          ...newNotice,
+          createdAt: serverTimestamp()
+        });
       }
       setIsAdding(false);
       setEditingId(null);
       setNewNotice({ title: '', content: '', date: '' });
-    } catch (err) {
-      console.error("Local storage error:", err);
+    } catch (err: any) {
+      alert("Failed to save notice: " + (err.message || String(err)));
     }
   };
 
@@ -556,9 +625,9 @@ function NoticesAdmin() {
 
   const handleDelete = async (id: string) => {
     try {
-      setNotices(notices.filter(n => n.id !== id));
+      await deleteDoc(doc(db, 'notices', id));
     } catch (err) {
-      console.error("Local storage error:", err);
+      handleFirestoreError(err, OperationType.DELETE, 'notices');
     }
   };
 
@@ -621,25 +690,40 @@ type NewsData = {
 };
 
 function NewsAdmin() {
-  const [news, setNews] = useLocalCollection<NewsData>('local_news');
+  const [news, setNews] = useState<NewsData[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [newNews, setNewNews] = useState({ title: '', category: 'General News', content: '', date: new Date().toISOString().split('T')[0], time: '', location: '', isEvent: false });
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const q = query(collection(db, 'news'), orderBy('date', 'desc'));
+    const unsubscribe = onSnapshot(q, snapshot => {
+      setNews(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as NewsData)));
+    });
+    return () => unsubscribe();
+  }, []);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
       if (editingId) {
-        setNews(news.map(n => n.id === editingId ? { ...n, ...newNews } : n));
+        const editingItem = news.find(n => n.id === editingId);
+        await setDoc(doc(db, 'news', editingId), {
+          ...newNews,
+          createdAt: editingItem && (editingItem as any).createdAt ? (editingItem as any).createdAt : serverTimestamp()
+        });
       } else {
         const newId = Date.now().toString() + Math.random().toString(36).substring(2,9);
-        setNews([{ id: newId, ...newNews } as NewsData, ...news]);
+        await setDoc(doc(db, 'news', newId), {
+          ...newNews,
+          createdAt: serverTimestamp()
+        });
       }
       setIsAdding(false);
       setEditingId(null);
       setNewNews({ title: '', category: 'General News', content: '', date: new Date().toISOString().split('T')[0], time: '', location: '', isEvent: false });
-    } catch (err) {
-      console.error("Local storage error:", err);
+    } catch (err: any) {
+      alert("Failed to save: " + (err.message || String(err)));
     }
   };
 
@@ -659,9 +743,9 @@ function NewsAdmin() {
 
   const handleDelete = async (id: string) => {
     try {
-      setNews(news.filter(n => n.id !== id));
+      await deleteDoc(doc(db, 'news', id));
     } catch (err) {
-      console.error("Local storage error:", err);
+      handleFirestoreError(err, OperationType.DELETE, 'news');
     }
   };
 
@@ -800,10 +884,18 @@ const resizeAndCompressImage = (file: File): Promise<string> => {
 };
 
 function GalleryAdmin() {
-  const [photos, setPhotos] = useLocalCollection<any>('local_photos');
+  const [photos, setPhotos] = useState<any[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [newPhoto, setNewPhoto] = useState<{title: string, description: string, images: string[]}>({ title: '', description: '', images: [] });
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const q = query(collection(db, 'photos'), orderBy('createdAt', 'desc'));
+    const unsubscribe = onSnapshot(q, snapshot => {
+      setPhotos(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any)));
+    });
+    return () => unsubscribe();
+  }, []);
 
   const handleMultipeImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -815,7 +907,6 @@ function GalleryAdmin() {
           newImages.push(compressed);
         } catch (error) {
           console.error('Error compressing image:', error);
-          alert('Failed to process an image. Please try a different one.');
         }
       }
       setNewPhoto(prev => ({ ...prev, images: [...prev.images, ...newImages] }));
@@ -830,36 +921,37 @@ function GalleryAdmin() {
     });
   };
 
-  const handleCreate = (e: React.FormEvent) => {
+  const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newPhoto.images.length === 0) {
       alert("Please upload at least one image.");
       return;
     }
     
-    if (editingId) {
-      setPhotos(photos.map(p => p.id === editingId ? {
-        ...p,
-        title: newPhoto.title,
-        description: newPhoto.description,
-        images: newPhoto.images,
-      } : p));
-    } else {
-      const newId = Date.now().toString() + Math.random().toString(36).substring(2,9);
-      setPhotos([
-        {
-          id: newId,
+    try {
+      if (editingId) {
+        const editingItem = photos.find(p => p.id === editingId);
+        await setDoc(doc(db, 'photos', editingId), {
           title: newPhoto.title,
           description: newPhoto.description,
           images: newPhoto.images,
-          createdAt: new Date().toISOString()
-        },
-        ...photos
-      ]);
+          createdAt: editingItem && (editingItem as any).createdAt ? (editingItem as any).createdAt : serverTimestamp()
+        });
+      } else {
+        const newId = Date.now().toString() + Math.random().toString(36).substring(2,9);
+        await setDoc(doc(db, 'photos', newId), {
+          title: newPhoto.title,
+          description: newPhoto.description,
+          images: newPhoto.images,
+          createdAt: serverTimestamp()
+        });
+      }
+      setIsAdding(false);
+      setEditingId(null);
+      setNewPhoto({ title: '', description: '', images: [] });
+    } catch (err: any) {
+      alert("Failed to save gallery: " + (err.message || String(err)));
     }
-    setIsAdding(false);
-    setEditingId(null);
-    setNewPhoto({ title: '', description: '', images: [] });
   };
 
   const handleEdit = (photo: any) => {
@@ -872,10 +964,12 @@ function GalleryAdmin() {
     setIsAdding(true);
   };
 
-  const handleDelete = (id: string, e?: React.MouseEvent) => {
+  const handleDelete = async (id: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    if (confirm("Are you sure you want to delete this gallery album?")) {
-      setPhotos(photos.filter(p => p.id !== id));
+    try {
+      await deleteDoc(doc(db, 'photos', id));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, 'photos');
     }
   };
 
@@ -989,10 +1083,18 @@ type ShopItem = {
 };
 
 export function ShopAdmin() {
-  const [items, setItems] = useLocalCollection<ShopItem>('local_merchandise');
+  const [items, setItems] = useState<ShopItem[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [newItem, setNewItem] = useState({ name: '', description: '', price: 0, stock: 0, imgUrl: '' });
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const q = query(collection(db, 'merchandise'), orderBy('createdAt', 'desc'));
+    const unsubscribe = onSnapshot(q, snapshot => {
+      setItems(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ShopItem)));
+    });
+    return () => unsubscribe();
+  }, []);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1002,36 +1104,36 @@ export function ShopAdmin() {
         setNewItem(prev => ({ ...prev, imgUrl: compressedBase64 }));
       } catch (error) {
         console.error('Error compressing image:', error);
-        alert('Failed to process image. Please try a different one.');
       }
     }
   };
 
-  const handleCreate = (e: React.FormEvent) => {
+  const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (editingId) {
-      setItems(items.map(i => i.id === editingId ? { 
-        ...i, 
-        ...newItem,
-        price: Number(newItem.price),
-        stock: Number(newItem.stock)
-      } : i));
-    } else {
-      const newId = Date.now().toString() + Math.random().toString(36).substring(2,9);
-      setItems([
-        {
-          id: newId,
+    try {
+      if (editingId) {
+        const editingItem = items.find(i => i.id === editingId);
+        await setDoc(doc(db, 'merchandise', editingId), { 
           ...newItem,
           price: Number(newItem.price),
           stock: Number(newItem.stock),
-          createdAt: new Date().toISOString()
-        },
-        ...items
-      ]);
+          createdAt: editingItem && (editingItem as any).createdAt ? (editingItem as any).createdAt : serverTimestamp()
+        });
+      } else {
+        const newId = Date.now().toString() + Math.random().toString(36).substring(2,9);
+        await setDoc(doc(db, 'merchandise', newId), {
+          ...newItem,
+          price: Number(newItem.price),
+          stock: Number(newItem.stock),
+          createdAt: serverTimestamp()
+        });
+      }
+      setIsAdding(false);
+      setEditingId(null);
+      setNewItem({ name: '', description: '', price: 0, stock: 0, imgUrl: '' });
+    } catch (err: any) {
+      alert("Failed to save: " + (err.message || String(err)));
     }
-    setIsAdding(false);
-    setEditingId(null);
-    setNewItem({ name: '', description: '', price: 0, stock: 0, imgUrl: '' });
   };
 
   const handleEdit = (item: ShopItem) => {
@@ -1046,8 +1148,12 @@ export function ShopAdmin() {
     setIsAdding(true);
   };
 
-  const handleDelete = (id: string) => {
-    setItems(items.filter(i => i.id !== id));
+  const handleDelete = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'merchandise', id));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, 'merchandise');
+    }
   };
 
   return (
